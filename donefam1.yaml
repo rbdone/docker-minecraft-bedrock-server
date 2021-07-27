@@ -1,0 +1,114 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: donefam1-minecraft-bedrock
+  labels:
+    role: service-config
+    app: donefam1-bds
+data:
+  # Find more options at https://github.com/itzg/docker-minecraft-bedrock-server#server-properties
+  # Remove # from in front of line if changing from default values.
+  EULA: "TRUE" # Must accept EULA to use this minecraft server
+  #GAMEMODE: "survival" # Options: survival, creative, adventure
+  #DIFFICULTY: "easy" # Options: peaceful, easy, normal, hard
+  #DEFAULT_PLAYER_PERMISSION_LEVEL: "member" # Options: visitor, member, operator
+  #LEVEL_NAME: "my_minecraft_world"
+  #LEVEL_SEED: "33480944"
+  SERVER_NAME: "DoneFam1"
+  SERVER_PORT: "30110"
+  #LEVEL_TYPE: "DEFAULT" # Options: FLAT, LEGACY, DEFAULT
+  #ALLOW_CHEATS: "false" # Options: true, false
+  MAX_PLAYERS: "20"
+  #PLAYER_IDLE_TIMEOUT: "30"
+  #TEXTUREPACK_REQUIRED: "false" # Options: true, false
+  #
+  ## Changing these will have a security impact
+  #ONLINE_MODE: "true" # Options: true, false (removes Xbox Live account requirements)
+  #WHITE_LIST: "false" # If enabled, need to provide a whitelist.json by your own means. 
+  #
+  ## Changing these will have a performance impact
+  #VIEW_DISTANCE: "10"
+  #TICK_DISTANCE: "4"
+  #MAX_THREADS: "8"
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: donefam1-bds
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: donefam1-bds
+  name: donefam1-bds
+spec:
+  # never more than 1 since BDS is not horizontally scalable
+  replicas: 1
+  serviceName: donefam1-bds
+  selector:
+    matchLabels:
+      app: donefam1-bds
+  template:
+    metadata:
+      labels:
+        app: donefam1-bds
+    spec:
+      containers:
+        - name: main
+          image: itzg/minecraft-bedrock-server
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: donefam1-minecraft-bedrock
+          volumeMounts:
+            - mountPath: /data
+              name: donefam1-data
+          ports:
+            - containerPort: 30110
+              protocol: UDP
+          readinessProbe: &probe
+            exec:
+              command:
+                - mc-monitor
+                - status-bedrock
+                - --host
+                # force health check against IPv4 port
+                - 127.0.0.1
+            initialDelaySeconds: 30
+          livenessProbe: *probe
+          tty: true
+          stdin: true
+  volumeClaimTemplates:
+    - metadata:
+        name: donefam1-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: donefam1-bds
+spec:
+  selector:
+    app: donefam1-bds
+  ports:
+    - port: 30110
+      protocol: UDP
+  # ipFamily: IPv4
+  # Use LoadBalancer if running on a provider that supports that
+  type: LoadBalancer
+  # or use NodePort on a non-managed system;
+  # however, you'll need to lookup port assigned to the service
+  # type: NodePort
